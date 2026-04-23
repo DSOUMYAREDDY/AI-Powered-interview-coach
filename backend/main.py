@@ -56,7 +56,7 @@ Example format: ["question 1?", "question 2?", "question 3?"]
                     "content": prompt,
                 }
             ],
-            model="llama3-8b-8192", 
+            model="llama-3.1-8b-instant", 
             temperature=0.7,
         )
 
@@ -76,4 +76,7 @@ Example format: ["question 1?", "question 2?", "question 3?"]
         return {"questions": questions}
 
     except Exception as e:
+        print(f"CRITICAL ERROR generating questions: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
