@@ -1,12 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Camera, Play, Square } from 'lucide-react';
+import { Camera, Play, Square, ArrowRight } from 'lucide-react';
 
 const Interview = () => {
   const navigate = useNavigate();
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [stream, setStream] = useState<MediaStream | null>(null);
+  
   const [isRecording, setIsRecording] = useState(false);
   const [status, setStatus] = useState('Idle');
   const [timer, setTimer] = useState(0);
+
+  // New state variables for the role and dynamic questions
+  const [selectedRole, setSelectedRole] = useState("");
+  const [questions, setQuestions] = useState<string[]>([]);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
 
   useEffect(() => {
     let interval: number | undefined;
@@ -27,16 +35,75 @@ const Interview = () => {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const handleStart = () => {
-    setIsRecording(true);
-    setStatus('Recording');
+  const handleStart = async () => {
+    // Prevent starting before selecting a role
+    if (!selectedRole) {
+      alert("Please select an Interview Role before starting!");
+      return;
+    }
+
+    try {
+      setStatus("Fetching questions from AI...");
+      
+      // Fetch dynamic questions from the Python backend
+      const response = await fetch("http://localhost:8000/api/generate-questions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: selectedRole })
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to fetch questions");
+      }
+
+      const data = await response.json();
+      setQuestions(data.questions);
+
+      // Once questions are fetched, start the camera
+      const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      setStream(mediaStream);
+      if (videoRef.current) {
+        videoRef.current.srcObject = mediaStream;
+      }
+      setIsRecording(true);
+      setStatus('Recording');
+    } catch (err) {
+      console.error("Error accessing camera or fetching API:", err);
+      setStatus("Error: Check backend or camera permissions");
+    }
   };
 
   const handleStop = () => {
     setIsRecording(false);
     setStatus('Processing...');
+    
+    // Stop all tracks to turn off the camera
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+      setStream(null);
+    }
+    
     setTimeout(() => setStatus('Idle'), 2000);
   };
+
+  const handleNext = () => {
+    if (currentQuestionIndex < questions.length - 1) {
+      setCurrentQuestionIndex(prev => prev + 1);
+    } else {
+      // Last question completed, go to dashboard
+      handleStop();
+      navigate('/dashboard');
+    }
+  };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [stream]);
 
   return (
     <div className="container" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -59,11 +126,15 @@ const Interview = () => {
         </div>
         <div style={{ flex: 1, minWidth: '300px' }}>
           <label className="form-label">Select Interview Role</label>
-          <select className="form-control" defaultValue="">
+          <select 
+            className="form-control" 
+            value={selectedRole}
+            onChange={(e) => setSelectedRole(e.target.value)}
+          >
             <option value="" disabled>-- Select Role --</option>
-            <option value="frontend">Frontend Developer</option>
-            <option value="backend">Backend Developer</option>
-            <option value="fullstack">Fullstack Developer</option>
+            <option value="frontend developer">Frontend Developer</option>
+            <option value="backend developer">Backend Developer</option>
+            <option value="fullstack developer">Fullstack Developer</option>
           </select>
         </div>
       </div>
@@ -71,22 +142,36 @@ const Interview = () => {
       {/* Progress Bar */}
       <div className="mb-4">
         <div className="flex justify-between mb-1">
-          <span style={{ fontSize: '0.85rem', fontWeight: 500, color: '#4b5563' }}>Question 1 of 3</span>
+          <span style={{ fontSize: '0.85rem', fontWeight: 500, color: '#4b5563' }}>
+            Question {questions.length > 0 ? currentQuestionIndex + 1 : 0} of {questions.length || '?'}
+          </span>
         </div>
         <div className="progress-container">
-          <div className="progress-bar" style={{ width: '33%' }}></div>
+          <div className="progress-bar" style={{ width: questions.length > 0 ? `${((currentQuestionIndex + 1) / questions.length) * 100}%` : '0%' }}></div>
         </div>
       </div>
 
       {/* Main Content Area */}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 1fr)', gap: '1.5rem', flex: 1 }}>
         
-        {/* Camera Preview Mock */}
-        <div style={{ backgroundColor: '#1f2937', borderRadius: 'var(--radius-md)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '350px', position: 'relative', boxShadow: 'var(--shadow-sm)' }}>
-          <div className="flex items-center gap-2" style={{ color: '#9ca3af', fontWeight: 500 }}>
-            <Camera size={24} />
-            Camera Preview
-          </div>
+        {/* Camera Preview Mock / Actual Video */}
+        <div style={{ backgroundColor: '#1f2937', borderRadius: 'var(--radius-md)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '350px', position: 'relative', boxShadow: 'var(--shadow-sm)', overflow: 'hidden' }}>
+          
+          <video 
+            ref={videoRef} 
+            autoPlay 
+            playsInline 
+            muted 
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: stream ? 'block' : 'none' }}
+          />
+          
+          {!stream && (
+            <div className="flex items-center gap-2" style={{ color: '#9ca3af', fontWeight: 500 }}>
+              <Camera size={24} />
+              Camera Preview
+            </div>
+          )}
+          
           {isRecording && (
              <div style={{ position: 'absolute', top: '1rem', right: '1rem', backgroundColor: 'var(--danger)', color: 'white', padding: '0.2rem 0.6rem', borderRadius: '1rem', fontSize: '0.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
                <div style={{ width: '8px', height: '8px', backgroundColor: 'white', borderRadius: '50%' }} /> REC
@@ -97,7 +182,9 @@ const Interview = () => {
         {/* Question & Controls Area */}
         <div className="card flex flex-col justify-center" style={{ backgroundColor: '#f9fafb' }}>
           <h3 className="mb-3" style={{ fontSize: '1.2rem' }}>Interview Question</h3>
-          <p className="mb-4" style={{ fontSize: '1.05rem', color: '#4b5563' }}>Tell me about yourself</p>
+          <p className="mb-4" style={{ fontSize: '1.05rem', color: '#4b5563' }}>
+            {questions.length > 0 ? questions[currentQuestionIndex] : "Pending AI generation..."}
+          </p>
           
           <div className="flex gap-2 mb-3">
             <button className="btn btn-primary" onClick={handleStart} disabled={isRecording} style={{ backgroundColor: '#3b82f6' }}>
@@ -106,8 +193,8 @@ const Interview = () => {
             <button className="btn btn-danger" onClick={handleStop} disabled={!isRecording}>
               <Square size={16} fill="currentColor" /> Stop
             </button>
-            <button className="btn" onClick={() => navigate('/dashboard')} disabled={isRecording} style={{ backgroundColor: '#e5e7eb', color: '#6b7280' }}>
-              Next
+            <button className="btn btn-outline" onClick={handleNext} disabled={!isRecording || questions.length === 0}>
+              {questions.length > 0 && currentQuestionIndex < questions.length - 1 ? 'Next Question' : 'Finish Interview'} <ArrowRight size={16} />
             </button>
           </div>
 
